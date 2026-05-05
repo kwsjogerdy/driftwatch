@@ -1,74 +1,70 @@
 package drift
 
 import (
-	"fmt"
-
 	"github.com/driftwatch/internal/state"
 )
 
-// Result holds the outcome of a drift comparison between two environments.
-type Result struct {
-	Baseline    string
-	Target      string
-	Drifted     bool
-	Mismatches  []Mismatch
+// DifferenceKind describes the nature of a detected drift.
+type DifferenceKind string
+
+const (
+	// KindValueMismatch means the key exists in both snapshots but values differ.
+	KindValueMismatch DifferenceKind = "VALUE_MISMATCH"
+	// KindMissing means the key is present in source but absent in target.
+	KindMissing DifferenceKind = "MISSING_IN_TARGET"
+	// KindExtra means the key is present in target but absent in source.
+	KindExtra DifferenceKind = "EXTRA_IN_TARGET"
+)
+
+// Difference represents a single drift finding between two snapshots.
+type Difference struct {
+	Key         string
+	SourceValue interface{}
+	TargetValue interface{}
+	Kind        DifferenceKind
 }
 
-// Mismatch describes a single resource key that differs between environments.
-type Mismatch struct {
-	Key           string
-	BaselineValue string
-	TargetValue   string
-}
+// Detect compares source and target snapshots and returns all differences.
+// An empty slice means the environments are in sync.
+func Detect(source, target state.Snapshot) []Difference {
+	var diffs []Difference
 
-// Detect compares two environment snapshots and returns a Result describing
-// any drift found between them.
-func Detect(baseline, target *state.Snapshot) (*Result, error) {
-	if baseline == nil {
-		return nil, fmt.Errorf("baseline snapshot must not be nil")
-	}
-	if target == nil {
-		return nil, fmt.Errorf("target snapshot must not be nil")
-	}
-
-	result := &Result{
-		Baseline: baseline.Environment,
-		Target:   target.Environment,
-	}
-
-	seen := make(map[string]bool)
-
-	for key, bVal := range baseline.Resources {
-		seen[key] = true
-		tVal, ok := target.Resources[key]
-		if !ok {
-			result.Mismatches = append(result.Mismatches, Mismatch{
-				Key:           key,
-				BaselineValue: bVal,
-				TargetValue:   "<missing>",
+	for key, srcVal := range source.Values {
+		tgtVal, exists := target.Values[key]
+		if !exists {
+			diffs = append(diffs, Difference{
+				Key:         key,
+				SourceValue: srcVal,
+				TargetValue: nil,
+				Kind:        KindMissing,
 			})
 			continue
 		}
-		if bVal != tVal {
-			result.Mismatches = append(result.Mismatches, Mismatch{
-				Key:           key,
-				BaselineValue: bVal,
-				TargetValue:   tVal,
+		if !valuesEqual(srcVal, tgtVal) {
+			diffs = append(diffs, Difference{
+				Key:         key,
+				SourceValue: srcVal,
+				TargetValue: tgtVal,
+				Kind:        KindValueMismatch,
 			})
 		}
 	}
 
-	for key, tVal := range target.Resources {
-		if seen[key] {
-			continue
+	for key, tgtVal := range target.Values {
+		if _, exists := source.Values[key]; !exists {
+			diffs = append(diffs, Difference{
+				Key:         key,
+				SourceValue: nil,
+				TargetValue: tgtVal,
+				Kind:        KindExtra,
+			})
 		}
-		result.Mismatches = append(result.Mismatches, Mismatch{
-			Key:           key,
-			BaselineValue: "<missing>",
-			TargetValue:   tVal,
-		})
 	}
 
-	result.Drifted = len(result.Mismatches) > 0
-	return result, nil
+	return diffs
+}
+
+// valuesEqual performs a simple equality check supporting primitive types.
+func valuesEqual(a, b interface{}) bool {
+	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 }
