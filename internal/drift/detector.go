@@ -1,62 +1,58 @@
 package drift
 
 import (
+	"fmt"
+
 	"github.com/driftwatch/internal/state"
 )
 
-// DifferenceKind describes the nature of a detected drift.
-type DifferenceKind string
-
-const (
-	// KindValueMismatch means the key exists in both snapshots but values differ.
-	KindValueMismatch DifferenceKind = "VALUE_MISMATCH"
-	// KindMissing means the key is present in source but absent in target.
-	KindMissing DifferenceKind = "MISSING_IN_TARGET"
-	// KindExtra means the key is present in target but absent in source.
-	KindExtra DifferenceKind = "EXTRA_IN_TARGET"
-)
-
-// Difference represents a single drift finding between two snapshots.
-type Difference struct {
-	Key         string
-	SourceValue interface{}
-	TargetValue interface{}
-	Kind        DifferenceKind
+// Diff represents a single detected difference between two snapshots.
+type Diff struct {
+	Key           string
+	Type          string // "mismatch", "missing", "extra"
+	BaselineValue string
+	TargetValue   string
 }
 
-// Detect compares source and target snapshots and returns all differences.
-// An empty slice means the environments are in sync.
-func Detect(source, target state.Snapshot) []Difference {
-	var diffs []Difference
+// String returns a human-readable representation of the diff.
+func (d Diff) String() string {
+	return fmt.Sprintf("[%s] key=%q baseline=%q target=%q",
+		d.Type, d.Key, d.BaselineValue, d.TargetValue)
+}
 
-	for key, srcVal := range source.Values {
-		tgtVal, exists := target.Values[key]
-		if !exists {
-			diffs = append(diffs, Difference{
-				Key:         key,
-				SourceValue: srcVal,
-				TargetValue: nil,
-				Kind:        KindMissing,
+// Detect compares a baseline snapshot against a target snapshot and
+// returns all detected diffs.
+func Detect(baseline, target state.Snapshot) []Diff {
+	var diffs []Diff
+
+	for k, bv := range baseline.Values {
+		tv, ok := target.Values[k]
+		if !ok {
+			diffs = append(diffs, Diff{
+				Key:           k,
+				Type:          "missing",
+				BaselineValue: bv,
+				TargetValue:   "",
 			})
 			continue
 		}
-		if !valuesEqual(srcVal, tgtVal) {
-			diffs = append(diffs, Difference{
-				Key:         key,
-				SourceValue: srcVal,
-				TargetValue: tgtVal,
-				Kind:        KindValueMismatch,
+		if !valuesEqual(bv, tv) {
+			diffs = append(diffs, Diff{
+				Key:           k,
+				Type:          "mismatch",
+				BaselineValue: bv,
+				TargetValue:   tv,
 			})
 		}
 	}
 
-	for key, tgtVal := range target.Values {
-		if _, exists := source.Values[key]; !exists {
-			diffs = append(diffs, Difference{
-				Key:         key,
-				SourceValue: nil,
-				TargetValue: tgtVal,
-				Kind:        KindExtra,
+	for k, tv := range target.Values {
+		if _, ok := baseline.Values[k]; !ok {
+			diffs = append(diffs, Diff{
+				Key:           k,
+				Type:          "extra",
+				BaselineValue: "",
+				TargetValue:   tv,
 			})
 		}
 	}
@@ -64,7 +60,7 @@ func Detect(source, target state.Snapshot) []Difference {
 	return diffs
 }
 
-// valuesEqual performs a simple equality check supporting primitive types.
-func valuesEqual(a, b interface{}) bool {
-	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+// valuesEqual performs a case-sensitive equality check on two state values.
+func valuesEqual(a, b string) bool {
+	return a == b
 }
