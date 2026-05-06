@@ -2,44 +2,43 @@ package schedule
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
-// DefaultInterval is the fallback watch interval when none is specified.
-const DefaultInterval = 5 * time.Minute
+// Config holds scheduling configuration for the drift watcher.
+type Config struct {
+	Interval  time.Duration
+	SourceEnv string
+	TargetEnv string
+}
 
-// ParseInterval parses a duration string and returns a validated interval.
-// Falls back to DefaultInterval if the input is empty.
-func ParseInterval(raw string) (time.Duration, error) {
-	if raw == "" {
-		return DefaultInterval, nil
+// ParseInterval parses a duration string into a time.Duration.
+// Returns an error if the string is empty, invalid, or non-positive.
+func ParseInterval(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, errors.New("interval must not be empty")
 	}
-	d, err := time.ParseDuration(raw)
+	d, err := time.ParseDuration(s)
 	if err != nil {
-		return 0, errors.New("invalid interval: " + err.Error())
+		return 0, fmt.Errorf("invalid interval %q: %w", s, err)
 	}
 	if d <= 0 {
-		return 0, errors.New("interval must be positive")
+		return 0, fmt.Errorf("interval must be positive, got %v", d)
 	}
 	return d, nil
 }
 
-// ValidateConfig checks that required WatchConfig fields are populated.
-func ValidateConfig(cfg WatchConfig) error {
+// ValidateConfig checks that a Config has all required fields set correctly.
+func ValidateConfig(cfg Config) error {
+	if cfg.Interval <= 0 {
+		return fmt.Errorf("interval must be positive, got %v", cfg.Interval)
+	}
 	if cfg.SourceEnv == "" {
 		return errors.New("source environment must not be empty")
 	}
 	if cfg.TargetEnv == "" {
 		return errors.New("target environment must not be empty")
-	}
-	if cfg.StateFile == "" {
-		return errors.New("state file path must not be empty")
-	}
-	if cfg.SourceEnv == cfg.TargetEnv {
-		return errors.New("source and target environments must differ")
-	}
-	if cfg.Interval <= 0 {
-		return errors.New("interval must be positive")
 	}
 	return nil
 }
