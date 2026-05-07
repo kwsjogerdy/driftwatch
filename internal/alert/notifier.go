@@ -67,7 +67,9 @@ func (n *Notifier) write(a *Alert) {
 	fmt.Fprint(n.Writer, sb.String())
 }
 
-// classifySeverity returns CRITICAL when keys are missing, WARNING otherwise.
+// classifySeverity returns CRITICAL when any keys are missing, WARNING otherwise.
+// A missing key indicates that configuration present in the source is absent in
+// the target, which is considered more severe than a value mismatch.
 func classifySeverity(diffs []drift.Difference) Severity {
 	for _, d := range diffs {
 		if d.Kind == drift.KindMissing {
@@ -75,4 +77,11 @@ func classifySeverity(diffs []drift.Difference) Severity {
 		}
 	}
 	return SeverityWarning
+}
+
+// Summary returns a single-line human-readable description of the alert,
+// suitable for use in log lines or notification titles.
+func (a *Alert) Summary() string {
+	return fmt.Sprintf("[%s] environment=%q differences=%d timestamp=%s",
+		a.Severity, a.Environment, len(a.Differences), a.Timestamp.Format(time.RFC3339))
 }
