@@ -16,9 +16,13 @@ func makeStore(t *testing.T) *baseline.Store {
 	return store
 }
 
+func makeComparator(t *testing.T) *baseline.Comparator {
+	t.Helper()
+	return baseline.NewComparator(makeStore(t))
+}
+
 func TestCompare_NoDrift_WhenMatchesBaseline(t *testing.T) {
-	store := makeStore(t)
-	cmp := baseline.NewComparator(store)
+	cmp := makeComparator(t)
 
 	live := state.Snapshot{
 		Environment: "production",
@@ -38,8 +42,7 @@ func TestCompare_NoDrift_WhenMatchesBaseline(t *testing.T) {
 }
 
 func TestCompare_DetectsDrift_WhenValueChanged(t *testing.T) {
-	store := makeStore(t)
-	cmp := baseline.NewComparator(store)
+	cmp := makeComparator(t)
 
 	original := state.Snapshot{
 		Environment: "production",
@@ -62,8 +65,7 @@ func TestCompare_DetectsDrift_WhenValueChanged(t *testing.T) {
 }
 
 func TestCompare_MissingBaseline_ReturnsError(t *testing.T) {
-	store := makeStore(t)
-	cmp := baseline.NewComparator(store)
+	cmp := makeComparator(t)
 
 	live := state.Snapshot{Environment: "production", Values: map[string]string{}}
 	_, err := cmp.Compare("staging", "production", live)
@@ -73,8 +75,7 @@ func TestCompare_MissingBaseline_ReturnsError(t *testing.T) {
 }
 
 func TestCompare_ReturnsBaselineAge(t *testing.T) {
-	store := makeStore(t)
-	cmp := baseline.NewComparator(store)
+	cmp := makeComparator(t)
 
 	live := state.Snapshot{
 		Environment: "production",
