@@ -8,94 +8,103 @@ func baseSummary() Summary {
 	return Summary{
 		TotalRuns:    10,
 		DriftCount:   3,
-		ErrorCount:   1,
-		DriftPercent: 30.0,
+		CleanCount:   7,
+		DriftRate:    0.30,
+		AvgDiffCount: 2.5,
 	}
 }
 
 func TestEvaluate_NoBreaches(t *testing.T) {
-	e := NewEvaluator([]Threshold{
-		{Field: "drift_count", WarnAt: 5, CritAt: 10},
-	})
+	thresholds := map[string]ThresholdConfig{
+		"drift_rate": {Field: "drift_rate", Warn: 0.5, Critical: 0.8},
+	}
+	e := NewEvaluator(thresholds)
 	breaches := e.Evaluate(baseSummary())
 	if len(breaches) != 0 {
-		t.Fatalf("expected 0 breaches, got %d", len(breaches))
+		t.Fatalf("expected no breaches, got %d", len(breaches))
 	}
 }
 
 func TestEvaluate_WarnBreach(t *testing.T) {
-	e := NewEvaluator([]Threshold{
-		{Field: "drift_count", WarnAt: 2, CritAt: 8},
-	})
+	thresholds := map[string]ThresholdConfig{
+		"drift_rate": {Field: "drift_rate", Warn: 0.2, Critical: 0.8},
+	}
+	e := NewEvaluator(thresholds)
 	breaches := e.Evaluate(baseSummary())
 	if len(breaches) != 1 {
 		t.Fatalf("expected 1 breach, got %d", len(breaches))
 	}
-	if breaches[0].Level != ThresholdWarn {
-		t.Errorf("expected warn level, got %s", breaches[0].Level)
+	if breaches[0].Level != BreachWarn {
+		t.Errorf("expected warn, got %s", breaches[0].Level)
 	}
 }
 
 func TestEvaluate_CritBreach(t *testing.T) {
-	e := NewEvaluator([]Threshold{
-		{Field: "drift_percent", WarnAt: 10, CritAt: 25},
-	})
+	thresholds := map[string]ThresholdConfig{
+		"drift_rate": {Field: "drift_rate", Warn: 0.1, Critical: 0.2},
+	}
+	e := NewEvaluator(thresholds)
 	breaches := e.Evaluate(baseSummary())
 	if len(breaches) != 1 {
 		t.Fatalf("expected 1 breach, got %d", len(breaches))
 	}
-	if breaches[0].Level != ThresholdCritical {
-		t.Errorf("expected critical level, got %s", breaches[0].Level)
+	if breaches[0].Level != BreachCritical {
+		t.Errorf("expected critical, got %s", breaches[0].Level)
 	}
 }
 
 func TestEvaluate_UnknownField_Skipped(t *testing.T) {
-	e := NewEvaluator([]Threshold{
-		{Field: "nonexistent", WarnAt: 1, CritAt: 2},
-	})
+	thresholds := map[string]ThresholdConfig{
+		"nonexistent_field": {Field: "nonexistent_field", Warn: 1, Critical: 2},
+	}
+	e := NewEvaluator(thresholds)
 	breaches := e.Evaluate(baseSummary())
 	if len(breaches) != 0 {
-		t.Fatalf("expected 0 breaches for unknown field, got %d", len(breaches))
+		t.Errorf("expected no breaches for unknown field, got %d", len(breaches))
+	}
+}
+
+func TestValidateThresholdConfig_Valid(t *testing.T) {
+	cfg := ThresholdConfig{Field: "drift_rate", Warn: 0.3, Critical: 0.7}
+	if err := ValidateThresholdConfig(cfg); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateThresholdConfig_EmptyField(t *testing.T) {
+	cfg := ThresholdConfig{Field: "", Warn: 0.3, Critical: 0.7}
+	if err := ValidateThresholdConfig(cfg); err == nil {
+		t.Error("expected error for empty field")
+	}
+}
+
+func TestValidateThresholdConfig_CritLessThanWarn(t *testing.T) {
+	cfg := ThresholdConfig{Field: "drift_rate", Warn: 0.8, Critical: 0.3}
+	if err := ValidateThresholdConfig(cfg); err == nil {
+		t.Error("expected error when critical < warn")
 	}
 }
 
 func TestBuildThresholds_Valid(t *testing.T) {
 	cfgs := []ThresholdConfig{
-		{Field: "drift_count", WarnAt: 3, CritAt: 7},
-		{Field: "error_count", WarnAt: 1, CritAt: 5},
+		{Field: "drift_rate", Warn: 0.3, Critical: 0.7},
+		{Field: "drift_count", Warn: 5, Critical: 10},
 	}
-	ts, err := BuildThresholds(cfgs)
+	m, err := BuildThresholds(cfgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(ts) != 2 {
-		t.Errorf("expected 2 thresholds, got %d", len(ts))
+	if len(m) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(m))
 	}
 }
 
-func TestBuildThresholds_InvalidField(t *testing.T) {
+func TestBuildThresholds_InvalidEntry_ReturnsError(t *testing.T) {
 	cfgs := []ThresholdConfig{
-		{Field: "unknown_field", WarnAt: 1},
+		{Field: "", Warn: 0.3, Critical: 0.7},
 	}
 	_, err := BuildThresholds(cfgs)
 	if err == nil {
-		t.Fatal("expected error for unknown field")
-	}
-}
-
-func TestBuildThresholds_CritBelowWarn(t *testing.T) {
-	cfgs := []ThresholdConfig{
-		{Field: "drift_count", WarnAt: 5, CritAt: 3},
-	}
-	_, err := BuildThresholds(cfgs)
-	if err == nil {
-		t.Fatal("expected error when crit_at <= warn_at")
-	}
-}
-
-func TestValidateThresholdConfig_EmptyField(t *testing.T) {
-	err := ValidateThresholdConfig(ThresholdConfig{Field: "", WarnAt: 1})
-	if err == nil {
-		t.Fatal("expected error for empty field")
+		t.Error("expected error for invalid threshold config")
 	}
 }

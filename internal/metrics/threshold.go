@@ -2,63 +2,57 @@ package metrics
 
 import "fmt"
 
-// ThresholdLevel represents the severity of a threshold breach.
-type ThresholdLevel string
+// BreachLevel indicates the severity of a threshold breach.
+type BreachLevel string
 
 const (
-	ThresholdWarn     ThresholdLevel = "warn"
-	ThresholdCritical ThresholdLevel = "critical"
+	BreachWarn     BreachLevel = "warn"
+	BreachCritical BreachLevel = "critical"
 )
-
-// Threshold defines a limit for a named metric field.
-type Threshold struct {
-	Field    string
-	WarnAt   float64
-	CritAt   float64
-}
 
 // Breach describes a single threshold violation.
 type Breach struct {
-	Field   string
-	Value   float64
-	Limit   float64
-	Level   ThresholdLevel
+	Field  string
+	Level  BreachLevel
+	Value  float64
+	Limit  float64
 }
 
 func (b Breach) String() string {
-	return fmt.Sprintf("%s: value %.2f exceeds %s limit %.2f", b.Field, b.Value, b.Level, b.Limit)
+	return fmt.Sprintf("%s [%s] value=%.2f limit=%.2f", b.Field, b.Level, b.Value, b.Limit)
 }
 
-// Evaluator checks a Summary against a set of Thresholds.
+// Evaluator checks a MetricSummary against a set of thresholds.
 type Evaluator struct {
-	thresholds []Threshold
+	thresholds map[string]ThresholdConfig
 }
 
-// NewEvaluator creates an Evaluator with the given thresholds.
-func NewEvaluator(thresholds []Threshold) *Evaluator {
+// NewEvaluator creates an Evaluator from a pre-built threshold map.
+func NewEvaluator(thresholds map[string]ThresholdConfig) *Evaluator {
 	return &Evaluator{thresholds: thresholds}
 }
 
-// Evaluate returns any threshold breaches found in the given Summary.
+// Evaluate returns all threshold breaches found in the given summary.
 func (e *Evaluator) Evaluate(s Summary) []Breach {
 	fields := map[string]float64{
-		"total_runs":    float64(s.TotalRuns),
-		"drift_count":   float64(s.DriftCount),
-		"error_count":   float64(s.ErrorCount),
-		"drift_percent": s.DriftPercent,
+		"drift_count":    float64(s.DriftCount),
+		"clean_count":    float64(s.CleanCount),
+		"total_runs":     float64(s.TotalRuns),
+		"drift_rate":     s.DriftRate,
+		"avg_diff_count": s.AvgDiffCount,
 	}
 
 	var breaches []Breach
-	for _, t := range e.thresholds {
-		v, ok := fields[t.Field]
+	for key, val := range fields {
+		cfg, ok := e.thresholds[key]
 		if !ok {
 			continue
 		}
 		switch {
-		case t.CritAt > 0 && v >= t.CritAt:
-			breaches = append(breaches, Breach{Field: t.Field, Value: v, Limit: t.CritAt, Level: ThresholdCritical})
-		case t.WarnAt > 0 && v >= t.WarnAt:
-			breaches = append(breaches, Breach{Field: t.Field, Value: v, Limit: t.WarnAt, Level: ThresholdWarn})
+		case val >= cfg.Critical:
+			breaches = append(breaches, Breach{Field: key, Level: BreachCritical, Value: val, Limit: cfg.Critical})
+		case val >= cfg.Warn:
+			breaches = append(breaches, Breach{Field: key, Level: BreachWarn, Value: val, Limit: cfg.Warn})
 		}
 	}
 	return breaches
