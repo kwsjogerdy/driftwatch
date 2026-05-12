@@ -1,60 +1,71 @@
 package diff
 
 import (
-	"errors"
-	"strings"
+	"fmt"
 )
 
-// Config controls the behaviour of the diff Builder.
+// Config controls how drift differences are classified and filtered.
 type Config struct {
-	// CriticalKeys lists keys whose drift should be treated as critical.
-	CriticalKeys []string `json:"critical_keys"`
-	// IgnoreKeys lists keys to exclude from comparison entirely.
-	IgnoreKeys []string `json:"ignore_keys"`
+	// DefaultSeverity is applied to mismatched keys not listed in CriticalKeys.
+	DefaultSeverity string
+
+	// CriticalKeys are key names that should always be classified as critical drift.
+	CriticalKeys []string
+
+	// IgnoreKeys are key names that should be excluded from drift comparison.
+	IgnoreKeys []string
 }
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		CriticalKeys: []string{},
-		IgnoreKeys:   []string{},
+		DefaultSeverity: "warning",
+		CriticalKeys:    []string{},
+		IgnoreKeys:      []string{},
 	}
 }
 
-// Validate checks that the Config is consistent.
-func Validate(c Config) error {
-	critSet := make(map[string]bool, len(c.CriticalKeys))
-	for _, k := range c.CriticalKeys {
-		if strings.TrimSpace(k) == "" {
-			return errors.New("diff: critical_keys contains a blank entry")
-		}
-		critSet[k] = true
+// Validate checks that the Config fields are consistent and valid.
+func Validate(cfg Config) error {
+	valid := map[string]bool{"warning": true, "critical": true}
+	if !valid[cfg.DefaultSeverity] {
+		return fmt.Errorf("invalid default_severity %q: must be 'warning' or 'critical'", cfg.DefaultSeverity)
 	}
-	for _, k := range c.IgnoreKeys {
-		if strings.TrimSpace(k) == "" {
-			return errors.New("diff: ignore_keys contains a blank entry")
-		}
-		if critSet[k] {
-			return errors.New("diff: key \"" + k + "\" appears in both critical_keys and ignore_keys")
+
+	ignoreSet := make(map[string]bool, len(cfg.IgnoreKeys))
+	for _, k := range cfg.IgnoreKeys {
+		ignoreSet[k] = true
+	}
+
+	for _, k := range cfg.CriticalKeys {
+		if ignoreSet[k] {
+			return fmt.Errorf("key %q appears in both critical_keys and ignore_keys", k)
 		}
 	}
+
 	return nil
 }
 
-// ApplyIgnore returns a copy of m with all ignore_keys removed.
-func ApplyIgnore(m map[string]interface{}, ignore []string) map[string]interface{} {
-	if len(ignore) == 0 {
-		return m
+// ApplyIgnore returns a copy of values with any keys listed in cfg.IgnoreKeys removed.
+func ApplyIgnore(cfg Config, values map[string]string) map[string]string {
+	if len(cfg.IgnoreKeys) == 0 {
+		copy := make(map[string]string, len(values))
+		for k, v := range values {
+			copy[k] = v
+		}
+		return copy
 	}
-	skip := make(map[string]bool, len(ignore))
-	for _, k := range ignore {
-		skip[k] = true
+
+	ignoreSet := make(map[string]bool, len(cfg.IgnoreKeys))
+	for _, k := range cfg.IgnoreKeys {
+		ignoreSet[k] = true
 	}
-	out := make(map[string]interface{}, len(m))
-	for k, v := range m {
-		if !skip[k] {
-			out[k] = v
+
+	result := make(map[string]string)
+	for k, v := range values {
+		if !ignoreSet[k] {
+			result[k] = v
 		}
 	}
-	return out
+	return result
 }
