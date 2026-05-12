@@ -76,3 +76,14 @@ func TestValidateConfig_MissingEnvs(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateConfig_SameEnvs(t *testing.T) {
+	cfg := schedule.Config{
+		Interval:  time.Minute,
+		SourceEnv: "production",
+		TargetEnv: "production",
+	}
+	if err := schedule.ValidateConfig(cfg); err == nil {
+		t.Fatal("expected error when SourceEnv and TargetEnv are the same")
+	}
+}
