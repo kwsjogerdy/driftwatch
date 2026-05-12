@@ -2,58 +2,76 @@ package metrics
 
 import "fmt"
 
-// BreachLevel indicates the severity of a threshold breach.
-type BreachLevel string
+// Severity represents the breach level of a threshold evaluation.
+type Severity string
 
 const (
-	BreachWarn     BreachLevel = "warn"
-	BreachCritical BreachLevel = "critical"
+	SeverityOK   Severity = "ok"
+	SeverityWarn Severity = "warn"
+	SeverityCrit Severity = "crit"
 )
+
+// Threshold defines warn and critical levels for a named summary field.
+type Threshold struct {
+	Field  string
+	WarnAt float64
+	CritAt float64
+}
 
 // Breach describes a single threshold violation.
 type Breach struct {
-	Field  string
-	Level  BreachLevel
-	Value  float64
-	Limit  float64
+	Field    string
+	Value    float64
+	Severity Severity
+	Message  string
 }
 
-func (b Breach) String() string {
-	return fmt.Sprintf("%s [%s] value=%.2f limit=%.2f", b.Field, b.Level, b.Value, b.Limit)
-}
-
-// Evaluator checks a MetricSummary against a set of thresholds.
+// Evaluator checks a MetricSummary against a set of Threshold rules.
 type Evaluator struct {
-	thresholds map[string]ThresholdConfig
+	thresholds []Threshold
 }
 
-// NewEvaluator creates an Evaluator from a pre-built threshold map.
-func NewEvaluator(thresholds map[string]ThresholdConfig) *Evaluator {
+// NewEvaluator creates an Evaluator with the provided thresholds.
+func NewEvaluator(thresholds []Threshold) *Evaluator {
 	return &Evaluator{thresholds: thresholds}
 }
 
-// Evaluate returns all threshold breaches found in the given summary.
+// Evaluate returns any breaches found in the given summary.
 func (e *Evaluator) Evaluate(s Summary) []Breach {
 	fields := map[string]float64{
-		"drift_count":    float64(s.DriftCount),
-		"clean_count":    float64(s.CleanCount),
-		"total_runs":     float64(s.TotalRuns),
-		"drift_rate":     s.DriftRate,
-		"avg_diff_count": s.AvgDiffCount,
+		"drift_count":    float64(s.TotalRuns),
+		"missing_keys":   float64(s.TotalMissing),
+		"extra_keys":     float64(s.TotalExtra),
+		"changed_values": float64(s.TotalChanged),
 	}
 
 	var breaches []Breach
-	for key, val := range fields {
-		cfg, ok := e.thresholds[key]
+	for _, t := range e.thresholds {
+		val, ok := fields[t.Field]
 		if !ok {
 			continue
 		}
-		switch {
-		case val >= cfg.Critical:
-			breaches = append(breaches, Breach{Field: key, Level: BreachCritical, Value: val, Limit: cfg.Critical})
-		case val >= cfg.Warn:
-			breaches = append(breaches, Breach{Field: key, Level: BreachWarn, Value: val, Limit: cfg.Warn})
+		sev := SeverityOK
+		if t.CritAt > 0 && val >= t.CritAt {
+			sev = SeverityCrit
+		} else if t.WarnAt > 0 && val >= t.WarnAt {
+			sev = SeverityWarn
+		}
+		if sev != SeverityOK {
+			breaches = append(breaches, Breach{
+				Field:    t.Field,
+				Value:    val,
+				Severity: sev,
+				Message:  fmt.Sprintf("%s=%.0f breaches %s threshold (%.0f)", t.Field, val, sev, thresholdLevel(t, sev)),
+			})
 		}
 	}
 	return breaches
+}
+
+func thresholdLevel(t Threshold, sev Severity) float64 {
+	if sev == SeverityCrit {
+		return t.CritAt
+	}
+	return t.WarnAt
 }

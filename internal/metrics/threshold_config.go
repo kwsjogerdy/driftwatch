@@ -1,43 +1,55 @@
 package metrics
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 )
 
-// ThresholdConfig holds warn/crit thresholds for a named metric field.
+// ThresholdConfig holds raw configuration for drift metric thresholds.
 type ThresholdConfig struct {
 	Field    string  `json:"field"`
-	Warn     float64 `json:"warn"`
-	Critical float64 `json:"critical"`
+	WarnAt   float64 `json:"warn_at"`
+	CritAt   float64 `json:"crit_at"`
 }
 
-// ValidateThresholdConfig returns an error if the config is malformed.
-func ValidateThresholdConfig(cfg ThresholdConfig) error {
-	if strings.TrimSpace(cfg.Field) == "" {
-		return fmt.Errorf("threshold field must not be empty")
+// ValidateThresholdConfig checks that a ThresholdConfig is well-formed.
+func ValidateThresholdConfig(c ThresholdConfig) error {
+	if c.Field == "" {
+		return errors.New("threshold field must not be empty")
 	}
-	if cfg.Warn < 0 {
-		return fmt.Errorf("warn threshold must be >= 0, got %.2f", cfg.Warn)
+	known := map[string]bool{
+		"drift_count":   true,
+		"missing_keys":  true,
+		"extra_keys":    true,
+		"changed_values": true,
 	}
-	if cfg.Critical < 0 {
-		return fmt.Errorf("critical threshold must be >= 0, got %.2f", cfg.Critical)
+	if !known[c.Field] {
+		return fmt.Errorf("unknown threshold field %q", c.Field)
 	}
-	if cfg.Critical < cfg.Warn {
-		return fmt.Errorf("critical threshold (%.2f) must be >= warn threshold (%.2f)", cfg.Critical, cfg.Warn)
+	if c.WarnAt < 0 {
+		return fmt.Errorf("warn_at must be >= 0, got %.2f", c.WarnAt)
+	}
+	if c.CritAt < 0 {
+		return fmt.Errorf("crit_at must be >= 0, got %.2f", c.CritAt)
+	}
+	if c.CritAt > 0 && c.WarnAt > 0 && c.CritAt < c.WarnAt {
+		return fmt.Errorf("crit_at (%.2f) must be >= warn_at (%.2f)", c.CritAt, c.WarnAt)
 	}
 	return nil
 }
 
-// BuildThresholds validates a slice of configs and returns a map keyed by
-// field name for fast lookup, or the first validation error encountered.
-func BuildThresholds(cfgs []ThresholdConfig) (map[string]ThresholdConfig, error) {
-	out := make(map[string]ThresholdConfig, len(cfgs))
-	for _, c := range cfgs {
+// BuildThresholds validates and converts a slice of ThresholdConfig into Threshold values.
+func BuildThresholds(cfgs []ThresholdConfig) ([]Threshold, error) {
+	out := make([]Threshold, 0, len(cfgs))
+	for i, c := range cfgs {
 		if err := ValidateThresholdConfig(c); err != nil {
-			return nil, fmt.Errorf("invalid threshold config for field %q: %w", c.Field, err)
+			return nil, fmt.Errorf("threshold[%d]: %w", i, err)
 		}
-		out[strings.ToLower(c.Field)] = c
+		out = append(out, Threshold{
+			Field:  c.Field,
+			WarnAt: c.WarnAt,
+			CritAt: c.CritAt,
+		})
 	}
 	return out, nil
 }
