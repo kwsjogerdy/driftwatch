@@ -21,6 +21,15 @@ func makeComparator(t *testing.T) *baseline.Comparator {
 	return baseline.NewComparator(makeStore(t))
 }
 
+// captureBaseline is a test helper that captures a baseline and fails the test
+// immediately if an error is returned.
+func captureBaseline(t *testing.T, cmp *baseline.Comparator, service, env string, snap state.Snapshot) {
+	t.Helper()
+	if err := cmp.CaptureBaseline(service, env, snap); err != nil {
+		t.Fatalf("CaptureBaseline(%q, %q): %v", service, env, err)
+	}
+}
+
 func TestCompare_NoDrift_WhenMatchesBaseline(t *testing.T) {
 	cmp := makeComparator(t)
 
@@ -28,9 +37,7 @@ func TestCompare_NoDrift_WhenMatchesBaseline(t *testing.T) {
 		Environment: "production",
 		Values:      map[string]string{"replicas": "3", "region": "us-east-1"},
 	}
-	if err := cmp.CaptureBaseline("staging", "production", live); err != nil {
-		t.Fatalf("CaptureBaseline: %v", err)
-	}
+	captureBaseline(t, cmp, "staging", "production", live)
 
 	result, err := cmp.Compare("staging", "production", live)
 	if err != nil {
@@ -48,7 +55,7 @@ func TestCompare_DetectsDrift_WhenValueChanged(t *testing.T) {
 		Environment: "production",
 		Values:      map[string]string{"replicas": "3"},
 	}
-	_ = cmp.CaptureBaseline("staging", "production", original)
+	captureBaseline(t, cmp, "staging", "production", original)
 
 	modified := state.Snapshot{
 		Environment: "production",
@@ -81,7 +88,7 @@ func TestCompare_ReturnsBaselineAge(t *testing.T) {
 		Environment: "production",
 		Values:      map[string]string{"key": "val"},
 	}
-	_ = cmp.CaptureBaseline("staging", "production", live)
+	captureBaseline(t, cmp, "staging", "production", live)
 
 	result, err := cmp.Compare("staging", "production", live)
 	if err != nil {
