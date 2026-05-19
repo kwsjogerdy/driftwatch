@@ -1,71 +1,62 @@
 package rollup
 
 import (
-	"errors"
+	"fmt"
 	"time"
 )
 
-// Granularity describes the time bucket size used when building periods.
-type Granularity string
-
-const (
-	GranularityHourly  Granularity = "hourly"
-	GranularityDaily   Granularity = "daily"
-	GranularityWeekly  Granularity = "weekly"
-)
-
-// Config controls rollup aggregation behaviour.
+// Config controls how drift history is rolled up into aggregate reports.
 type Config struct {
-	// Granularity sets the aggregation window size.
-	Granularity Granularity `json:"granularity"`
-	// MaxTopKeys limits how many frequently-drifted keys are reported.
-	MaxTopKeys int `json:"max_top_keys"`
-	// RetentionDays controls how far back entries are considered.
-	RetentionDays int `json:"retention_days"`
+	// Period is the aggregation window: "daily", "weekly", or "monthly".
+	Period string `json:"period"`
+
+	// TopKeysLimit is the maximum number of frequently-drifting keys to surface.
+	TopKeysLimit int `json:"top_keys_limit"`
+}
+
+var validPeriods = map[string]bool{
+	"daily":   true,
+	"weekly":  true,
+	"monthly": true,
 }
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Granularity:   GranularityDaily,
-		MaxTopKeys:    5,
-		RetentionDays: 30,
+		Period:       "daily",
+		TopKeysLimit: 10,
 	}
 }
 
-// Validate checks that the Config fields are acceptable.
-func Validate(c Config) error {
-	switch c.Granularity {
-	case GranularityHourly, GranularityDaily, GranularityWeekly:
-		// valid
-	default:
-		return errors.New("rollup: granularity must be one of hourly, daily, weekly")
+// Validate returns an error if the Config contains invalid values.
+func Validate(cfg Config) error {
+	if !validPeriods[cfg.Period] {
+		return fmt.Errorf("rollup: invalid period %q: must be daily, weekly, or monthly", cfg.Period)
 	}
-	if c.MaxTopKeys < 1 {
-		return errors.New("rollup: max_top_keys must be at least 1")
-	}
-	if c.RetentionDays < 1 {
-		return errors.New("rollup: retention_days must be at least 1")
+	if cfg.TopKeysLimit <= 0 {
+		return fmt.Errorf("rollup: top_keys_limit must be positive, got %d", cfg.TopKeysLimit)
 	}
 	return nil
 }
 
-// PeriodFor returns a Period aligned to the given granularity that contains t.
-func PeriodFor(t time.Time, g Granularity) Period {
-	switch g {
-	case GranularityHourly:
-		start := t.Truncate(time.Hour)
-		return Period{Start: start, End: start.Add(time.Hour)}
-	case GranularityWeekly:
-		// Align to Monday.
+// PeriodFor returns the start and end times of the aggregation window that
+// contains t, according to cfg.Period.
+func PeriodFor(cfg Config, t time.Time) (start, end time.Time) {
+	switch cfg.Period {
+	case "weekly":
+		// Align to Monday of the current week.
 		weekday := int(t.Weekday())
 		if weekday == 0 {
-			weekday = 7
+			weekday = 7 // Sunday → 7 so Monday is day 1
 		}
-		start := time.Date(t.Year(), t.Month(), t.Day()-weekday+1, 0, 0, 0, 0, t.Location())
-		return Period{Start: start, End: start.Add(7 * 24 * time.Hour)}
-	default: // daily
-		start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-		return Period{Start: start, End: start.Add(24 * time.Hour)}
+		start = time.Date(t.Year(), t.Month(), t.Day()-weekday+1, 0, 0, 0, 0, t.Location())
+		end = start.Add(7 * 24 * time.Hour)
+	case "monthly":
+		start = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+		end = start.AddDate(0, 1, 0)
+	default: // "daily"
+		start = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		end = start.Add(24 * time.Hour)
 	}
+	return start, end
 }
